@@ -48,69 +48,64 @@ class Config(object):
 
 class Txt(object):
 
-    START_TXT = """
-╔═══════════════════════════╗
-║   ⚡  G O A T  U I  ⚡   ║
-╚═══════════════════════════╝
+    START_TXT = """<b>⚡ G O A T  U I ⚡
 
-<b>Hey {}! 👋
+━━━━━━━━━━━━━━━━━━━━
+Hey {}! 👋
 
-I am an Advanced Media Processing Bot.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🤖 Advanced Media Processing Bot
+━━━━━━━━━━━━━━━━━━━━
 
-🎬  Encode    •    🗜️  Compress
-🔀  Merge     •    🔍  Upscale
-✏️  Rename    •    ⚙️  Settings
+🎞 Encode　　•　🗜 Compress
+🔀 Merge　　　•　🔬 Upscale
+✏️ Rename　　•　⚙️ Settings
 
+━━━━━━━━━━━━━━━━━━━━
 Use /help to see all commands.</b>
 """
 
-    HELP_TXT = """
-╔═══════════════════════════╗
-║    📋  C O M M A N D S    ║
-╚═══════════════════════════╝
+    HELP_TXT = """<b>📋 C O M M A N D S
+━━━━━━━━━━━━━━━━━━━━
 
-<b>🎬  ENCODE
-</b><code>/encode</code> — Reply to a video to encode it
+🎞 ENCODE
+</b><code>/encode</code> — Reply to video → encode
 
-<b>🗜️  COMPRESS
-</b><code>/compress</code> — Reply to a video to compress it
+<b>🗜 COMPRESS
+</b><code>/compress</code> — Reply to video → compress
 
-<b>🔀  MERGE
-</b><code>/merge</code> — Start a merge session
-<code>/done</code> — Finish and merge all files
-<code>/mergecancel</code> — Cancel active session
+<b>🔀 MERGE
+</b><code>/merge</code> — Start merge session
+<code>/done</code> — Merge all files
+<code>/mergecancel</code> — Cancel session
 
-<b>🔍  UPSCALE
-</b><code>/upscale</code> — Reply to an image to upscale it
+<b>🔬 UPSCALE
+</b><code>/upscale</code> — Reply to image → upscale
 
-<b>✏️  RENAME
-</b><code>/autorename</code> — Set auto rename format
+<b>✏️ RENAME
+</b><code>/autorename</code> — Set rename format
 <code>/select 1-12</code> — Set episode range
 
-<b>⚙️  SETTINGS
-</b><code>/settings</code> — Manage thumbnail and metadata
+<b>⚙️ SETTINGS
+</b><code>/settings</code> — Thumbnail & Metadata
 
-<b>📊  STATUS
+<b>📊 STATUS
 </b><code>/status</code> — View all active tasks
-
+━━━━━━━━━━━━━━━━━━━━</b>
 """
 
-    FILE_NAME_TXT = """
-╔═══════════════════════════╗
-║  ✏️  A U T O  R E N A M E  ║
-╚═══════════════════════════╝
 
-<b>Set your rename format:
-<code>/autorename Anime S{season}E{episode} {quality}</code>
+    FILE_NAME_TXT = """<b>✏️ A U T O  R E N A M E
+━━━━━━━━━━━━━━━━━━━━
+Set your format:
+<code>/autorename Anime S{{season}}E{{episode}} {{quality}}</code>
 
 Placeholders:
-• <code>{season}</code>   — Season number
-• <code>{episode}</code>  — Episode number
-• <code>{quality}</code>  — Quality (1080p etc)
+‣ <code>{{season}}</code>  — Season number
+‣ <code>{{episode}}</code> — Episode number
+‣ <code>{{quality}}</code> — Quality (1080p etc)
 
-Current Format:
-{format_template}</b>
+━━━━━━━━━━━━━━━━━━━━
+Current Format: {format_template}</b>
 """
 
     PROGRESS_BAR = """
@@ -120,62 +115,51 @@ Current Format:
 <b>» ETA</b>   : {4}
 """
 
-    SEND_METADATA = """
-╔═══════════════════════════╗
-║  🏷️  M E T A D A T A      ║
-╚═══════════════════════════╝
-
-<b>Use /settings → 🏷️ Metadata
+    SEND_METADATA = """<b>🏷 M E T A D A T A
+━━━━━━━━━━━━━━━━━━━━
+Use /settings → 🏷 Metadata
 to set Title, Author and Artist tags.</b>
 """
 
-    THUMBNAIL_TXT = """
-╔═══════════════════════════╗
-║  🖼️  T H U M B N A I L    ║
-╚═══════════════════════════╝
-
-<b>Use /settings → 🖼️ Thumbnail
-to upload and manage your thumbnail.</b>
+    THUMBNAIL_TXT = """<b>🖼 T H U M B N A I L  &  M E T A D A T A
+━━━━━━━━━━━━━━━━━━━━
+Use /settings to manage:
+‣ 🖼 Thumbnail — upload custom thumb
+‣ 🏷 Metadata — set title, author, artist</b>
 """
 
-    DONATE_TXT = """
-╔═══════════════════════════╗
-║    💝  S U P P O R T      ║
-╚═══════════════════════════╝
+    DONATE_TXT = """<b>💝 S U P P O R T
+━━━━━━━━━━━━━━━━━━━━
+Enjoying the bot? Support us! ❤️
 
-<b>Enjoying the bot? Consider supporting! ❤️
-
-Every contribution keeps the bot running. 🚀</b>
+Every contribution keeps it running 🚀</b>
 """
 
-    SOURCE_TXT = """
-╔═══════════════════════════╗
-║    📦  S O U R C E        ║
-╚═══════════════════════════╝
+    SOURCE_TXT = """<b>📦 S O U R C E
+━━━━━━━━━━━━━━━━━━━━
+This bot is a private project.
 
-<b>This bot is a private project.
-
-For support or queries, contact the owner.</b>
+For support, contact the owner directly.</b>
 """
 
-    ABOUT_TXT = """
-╔═══════════════════════════╗
-║    ℹ️  A B O U T  B O T   ║
-╚═══════════════════════════╝
+    ABOUT_TXT = """<b>ℹ️ A B O U T  B O T
+━━━━━━━━━━━━━━━━━━━━
 
-<b>⚡ Goat UI — Advanced Media Bot
+⚡ Goat UI — Advanced Media Bot
 
 🎯 Features:
-• 🎬 H.265 Video Encoding
-• 🗜️ Smart Compression
-• 🔀 Multi-file Merging
-• 🔍 AI Image Upscaling
-• ✏️ Auto File Renaming
-• ⚙️ Custom Metadata and Thumbnail
-• 📊 Live Task Status
+‣ 🎞 H.265 Video Encoding
+‣ 🗜 Smart Compression
+‣ 🔀 Multi-file Merging
+‣ 🔬 AI Image Upscaling
+‣ ✏️ Auto File Renaming
+‣ ⚙️ Metadata & Thumbnail
+‣ 📊 Live Task Status
 
-👨‍💻 Developer : @cosmic_freak
-📢 Updates   : @Codeflix_Bots</b>
+━━━━━━━━━━━━━━━━━━━━
+👨‍💻 Dev : @cosmic_freak
+📢 Updates : @Codeflix_Bots</b>
 """
+
 
     CAPTION_TXT = ""
