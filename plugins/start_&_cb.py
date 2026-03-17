@@ -62,7 +62,7 @@ async def start(client, message: Message):
 
 # ================= CALLBACK HANDLER =================
 
-@Client.on_callback_query(filters.regex(r"^(home|help|caption|file_names|thumbnail|meta|donate|about|source|close)$"))
+@Client.on_callback_query(filters.regex(r"^(home|help|settings_info|file_names|donate|about|source|close)$"))
 async def cb_handler(client, query: CallbackQuery):
 
     data = query.data
@@ -95,11 +95,7 @@ async def cb_handler(client, query: CallbackQuery):
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("• ᴀᴜᴛᴏ ʀᴇɴᴀᴍᴇ ғᴏʀᴍᴀᴛ •", callback_data="file_names")],
                 [
-                    InlineKeyboardButton("• ᴛʜᴜᴍʙɴᴀɪʟ", callback_data="thumbnail"),
-                    InlineKeyboardButton("ᴄᴀᴘᴛɪᴏɴ •", callback_data="caption")
-                ],
-                [
-                    InlineKeyboardButton("• ᴍᴇᴛᴀᴅᴀᴛᴀ", callback_data="meta"),
+                    InlineKeyboardButton("• sᴇᴛᴛɪɴɢs •", callback_data="settings_info"),
                     InlineKeyboardButton("ᴅᴏɴᴀᴛᴇ •", callback_data="donate")
                 ],
                 [InlineKeyboardButton("• ʜᴏᴍᴇ", callback_data="home")]
@@ -107,10 +103,10 @@ async def cb_handler(client, query: CallbackQuery):
         )
 
 
-    elif data == "caption":
+    elif data == "settings_info":
 
         await query.message.edit_text(
-            Txt.CAPTION_TXT,
+            Txt.THUMBNAIL_TXT,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("• ʙᴀᴄᴋ •", callback_data="help")]
             ])
@@ -210,11 +206,7 @@ async def help_command(client, message):
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("• ᴀᴜᴛᴏ ʀᴇɴᴀᴍᴇ ғᴏʀᴍᴀᴛ •", callback_data="file_names")],
             [
-                InlineKeyboardButton("• ᴛʜᴜᴍʙɴᴀɪʟ", callback_data="thumbnail"),
-                InlineKeyboardButton("ᴄᴀᴘᴛɪᴏɴ •", callback_data="caption")
-            ],
-            [
-                InlineKeyboardButton("• ᴍᴇᴛᴀᴅᴀᴛᴀ", callback_data="meta"),
+                InlineKeyboardButton("• sᴇᴛᴛɪɴɢs •", callback_data="settings_info"),
                 InlineKeyboardButton("ᴅᴏɴᴀᴛᴇ •", callback_data="donate")
             ],
             [InlineKeyboardButton("• ʜᴏᴍᴇ", callback_data="home")]
