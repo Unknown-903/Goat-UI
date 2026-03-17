@@ -1,25 +1,52 @@
 import os
+import time
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
-from pyrogram.errors import UserNotParticipant
+from pyrogram.errors import UserNotParticipant, ChatAdminRequired, ChannelInvalid, PeerIdInvalid
 from config import Config
 
 FORCE_SUB_CHANNELS = Config.FORCE_SUB_CHANNELS
 IMAGE_URL = "https://graph.org/file/a27d85469761da836337c.jpg"
 
+# Cache: user_id -> (timestamp, is_subscribed)
+# Har user ka result 5 min cache karo — repeated API calls avoid karo
+_sub_cache = {}
+CACHE_TTL = 300  # 5 minutes
+
 async def not_subscribed(_, __, message):
     if not message.from_user:
         return False
+
+    user_id = message.from_user.id
+
+    # Cache check — avoid repeated API calls
+    cached = _sub_cache.get(user_id)
+    if cached:
+        ts, result = cached
+        if time.time() - ts < CACHE_TTL:
+            return result
+
+    # Check all channels
     for channel in FORCE_SUB_CHANNELS:
+        if not channel or not channel.strip():
+            continue
         try:
-            user = await message._client.get_chat_member(channel, message.from_user.id)
-            if user.status in {"kicked", "left"}:
+            member = await message._client.get_chat_member(channel.strip(), user_id)
+            if member.status in {"kicked", "left"}:
+                _sub_cache[user_id] = (time.time(), True)
                 return True
         except UserNotParticipant:
+            _sub_cache[user_id] = (time.time(), True)
             return True
-        except Exception:
-            # Bot is not admin in channel — skip force sub check
+        except (ChatAdminRequired, ChannelInvalid, PeerIdInvalid):
+            # Bot not admin or invalid channel — disable force sub silently
+            _sub_cache[user_id] = (time.time(), False)
             return False
+        except Exception:
+            _sub_cache[user_id] = (time.time(), False)
+            return False
+
+    _sub_cache[user_id] = (time.time(), False)
     return False
 
 @Client.on_message(filters.private & filters.create(not_subscribed))
@@ -75,6 +102,9 @@ async def check_subscription(client, callback_query: CallbackQuery):
             not_joined_channels.append(channel)
         except Exception:
             pass  # Bot not admin — skip
+
+    # Clear cache so next message is checked fresh
+    _sub_cache.pop(user_id, None)
 
     if not not_joined_channels:
         new_text = "**ʏᴏᴜ ʜᴀᴠᴇ ᴊᴏɪɴᴇᴅ ᴀʟʟ ᴛʜᴇ ʀᴇǫᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟs. ᴛʜᴀɴᴋ ʏᴏᴜ! 😊 /start ɴᴏᴡ**"
