@@ -72,8 +72,8 @@ Current Format:
     HELP_TXT = """<b>Important Commands
 
 /autorename – Set rename format
-/metadata – Turn metadata on/off
-/queue – Show queue status
+/settings – Set metadata & thumb
+/status – Show queue status
 /restart – Restart bot (Owner only)
 </b>"""
 
