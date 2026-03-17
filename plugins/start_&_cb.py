@@ -125,20 +125,10 @@ async def cb_handler(client, query: CallbackQuery):
         )
 
 
-    elif data == "thumbnail":
+    elif data == "settings_info":
 
         await query.message.edit_text(
             Txt.THUMBNAIL_TXT,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("• ʙᴀᴄᴋ •", callback_data="help")]
-            ])
-        )
-
-
-    elif data == "meta":
-
-        await query.message.edit_text(
-            Txt.SEND_METADATA,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("• ʙᴀᴄᴋ •", callback_data="help")]
             ])
