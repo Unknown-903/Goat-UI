@@ -8,8 +8,8 @@ id_pattern = re.compile(r'^.\d+$')
 class Config(object):
 
     # ================= BOT CONFIG =================
-    API_ID = int(os.environ.get("API_ID", 29776284))
-    API_HASH = os.environ.get("API_HASH", "aa9d8ca9cf83f30aa897effa6296493a")
+    API_ID    = int(os.environ.get("API_ID", 29776284))
+    API_HASH  = os.environ.get("API_HASH", "aa9d8ca9cf83f30aa897effa6296493a")
     BOT_TOKEN = os.environ.get("BOT_TOKEN", "8142527078:AAFifGQPKZPIz2ZnGXIGOGYFlZdheNrmxec")
 
     # ================= OWNER =================
@@ -17,15 +17,14 @@ class Config(object):
 
     # ================= DATABASE =================
     DB_NAME = os.environ.get("DB_NAME", "Yato")
-    DB_URL = os.environ.get(
+    DB_URL  = os.environ.get(
         "DB_URL",
         "mongodb+srv://Toonpro12:animebash@cluster0.e6hpn8l.mongodb.net/?retryWrites=true&w=majority"
     )
 
-    PORT = int(os.environ.get("PORT", "8080"))
-
-    # ================= BOT STATUS =================
+    PORT       = int(os.environ.get("PORT", "8080"))
     BOT_UPTIME = time.time()
+    WEBHOOK    = os.environ.get("WEBHOOK", "True").lower() == "true"
 
     START_PIC = os.environ.get(
         "START_PIC",
@@ -40,100 +39,143 @@ class Config(object):
 
     # ================= CHANNELS =================
     FORCE_SUB_CHANNELS = os.environ.get(
-        "FORCE_SUB_CHANNELS",
-        "sharktoonsindia"
+        "FORCE_SUB_CHANNELS", "sharktoonsindia"
     ).split(",")
 
-    LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "-1002913785995"))
+    LOG_CHANNEL  = int(os.environ.get("LOG_CHANNEL",  "-1002913785995"))
     DUMP_CHANNEL = int(os.environ.get("DUMP_CHANNEL", "-1002913785995"))
-
-    # ================= WEBHOOK =================
-    WEBHOOK = os.environ.get("WEBHOOK", "True").lower() == "true"
 
 
 class Txt(object):
 
-    START_TXT = """<b>ʜᴇʏ! {}
+    START_TXT = """
+╔═══════════════════════════╗
+║   ⚡  G O A T  U I  ⚡   ║
+╚═══════════════════════════╝
 
-» ɪ ᴀᴍ ᴀᴅᴠᴀɴᴄᴇᴅ ʀᴇɴᴀᴍᴇ ʙᴏᴛ!
-ɪ ᴄᴀɴ ᴀᴜᴛᴏ ʀᴇɴᴀᴍᴇ ʏᴏᴜʀ ғɪʟᴇs ᴡɪᴛʜ
-ᴄᴜsᴛᴏᴍ ᴄᴀᴘᴛɪᴏɴ ᴀɴᴅ ᴛʜᴜᴍʙɴᴀɪʟ.</b>
+<b>Hey {}! 👋
+
+I am an Advanced Media Processing Bot.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎬  Encode    •    🗜️  Compress
+🔀  Merge     •    🔍  Upscale
+✏️  Rename    •    ⚙️  Settings
+
+Use /help to see all commands.</b>
 """
 
-    FILE_NAME_TXT = """<b>Set Auto Rename Format
+    HELP_TXT = """
+╔═══════════════════════════╗
+║    📋  C O M M A N D S    ║
+╚═══════════════════════════╝
 
-Example:
-/autorename Anime Name S{season}E{episode} {quality}
+<b>🎬  ENCODE
+</b><code>/encode</code> — Reply to a video to encode it
 
-Current Format:
-{format_template}
-</b>"""
+<b>🗜️  COMPRESS
+</b><code>/compress</code> — Reply to a video to compress it
 
-    HELP_TXT = """<b>Important Commands
+<b>🔀  MERGE
+</b><code>/merge</code> — Start a merge session
+<code>/done</code> — Finish and merge all files
+<code>/mergecancel</code> — Cancel active session
 
-/autorename – Set rename format
-/settings – Set metadata & thumb
-/status – Show queue status
-/restart – Restart bot (Owner only)
-</b>"""
+<b>🔍  UPSCALE
+</b><code>/upscale</code> — Reply to an image to upscale it
 
-    PROGRESS_BAR = """
-<b>» Size</b> : {1} | {2}
-<b>» Done</b> : {0}%
-<b>» Speed</b> : {3}/s
-<b>» ETA</b> : {4}
+<b>✏️  RENAME
+</b><code>/autorename</code> — Set auto rename format
+<code>/select 1-12</code> — Set episode range
+
+<b>⚙️  SETTINGS
+</b><code>/settings</code> — Manage thumbnail and metadata
+
+<b>📊  STATUS
+</b><code>/status</code> — View all active tasks
+
 """
 
-    CAPTION_TXT = """<b>Set Custom Caption
+    FILE_NAME_TXT = """
+╔═══════════════════════════╗
+║  ✏️  A U T O  R E N A M E  ║
+╚═══════════════════════════╝
 
-Commands:
-/set_caption - Set your caption
-/del_caption - Delete caption
-/see_caption - View current caption
+<b>Set your rename format:
+<code>/autorename Anime S{season}E{episode} {quality}</code>
 
 Placeholders:
-{filename} - File name
-{filesize} - File size
-</b>"""
+• <code>{season}</code>   — Season number
+• <code>{episode}</code>  — Episode number
+• <code>{quality}</code>  — Quality (1080p etc)
 
-    THUMBNAIL_TXT = """<b>Thumbnail Commands
+Current Format:
+{format_template}</b>
+"""
 
-/setthumb - Set thumbnail (reply to photo)
-/viewthumb - View current thumbnail
-/delthumb - Delete thumbnail
-</b>"""
+    PROGRESS_BAR = """
+<b>» Size</b>  : {1} | {2}
+<b>» Done</b>  : {0}%
+<b>» Speed</b> : {3}/s
+<b>» ETA</b>   : {4}
+"""
 
-    SEND_METADATA = """<b>Metadata Commands
+    SEND_METADATA = """
+╔═══════════════════════════╗
+║  🏷️  M E T A D A T A      ║
+╚═══════════════════════════╝
 
-/setmetadata Name - Set all metadata fields
-/metadata - View current metadata
+<b>Use /settings → 🏷️ Metadata
+to set Title, Author and Artist tags.</b>
+"""
 
-Fields updated: Title, Author, Artist, Video, Audio, Subtitle
-</b>"""
+    THUMBNAIL_TXT = """
+╔═══════════════════════════╗
+║  🖼️  T H U M B N A I L    ║
+╚═══════════════════════════╝
 
-    DONATE_TXT = """<b>Support the Developer ❤️
+<b>Use /settings → 🖼️ Thumbnail
+to upload and manage your thumbnail.</b>
+"""
 
-If you find this bot useful, consider supporting!
+    DONATE_TXT = """
+╔═══════════════════════════╗
+║    💝  S U P P O R T      ║
+╚═══════════════════════════╝
 
-Every contribution helps keep the bot running 🚀
-</b>"""
+<b>Enjoying the bot? Consider supporting! ❤️
 
-    SOURCE_TXT = """<b>Bot Source Code
+Every contribution keeps the bot running. 🚀</b>
+"""
 
-This bot is a private project.
+    SOURCE_TXT = """
+╔═══════════════════════════╗
+║    📦  S O U R C E        ║
+╚═══════════════════════════╝
 
-For support or queries, contact the owner.
-</b>"""
+<b>This bot is a private project.
 
-    ABOUT_TXT = """<b>About This Bot
+For support or queries, contact the owner.</b>
+"""
 
-Advanced File Rename Bot with:
-• Auto rename with season/episode detection
-• Custom caption & thumbnail
-• Metadata embedding
-• H.265 encoding support
-• Queue management
+    ABOUT_TXT = """
+╔═══════════════════════════╗
+║    ℹ️  A B O U T  B O T   ║
+╚═══════════════════════════╝
 
-Developer: @cosmic_freak
-Updates: @Codeflix_Bots
-</b>"""
+<b>⚡ Goat UI — Advanced Media Bot
+
+🎯 Features:
+• 🎬 H.265 Video Encoding
+• 🗜️ Smart Compression
+• 🔀 Multi-file Merging
+• 🔍 AI Image Upscaling
+• ✏️ Auto File Renaming
+• ⚙️ Custom Metadata and Thumbnail
+• 📊 Live Task Status
+
+👨‍💻 Developer : @cosmic_freak
+📢 Updates   : @Codeflix_Bots</b>
+"""
+
+    CAPTION_TXT = ""
