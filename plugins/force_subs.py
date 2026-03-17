@@ -8,6 +8,8 @@ FORCE_SUB_CHANNELS = Config.FORCE_SUB_CHANNELS
 IMAGE_URL = "https://graph.org/file/a27d85469761da836337c.jpg"
 
 async def not_subscribed(_, __, message):
+    if not message.from_user:
+        return False
     for channel in FORCE_SUB_CHANNELS:
         try:
             user = await message._client.get_chat_member(channel, message.from_user.id)
@@ -15,6 +17,9 @@ async def not_subscribed(_, __, message):
                 return True
         except UserNotParticipant:
             return True
+        except Exception:
+            # Bot is not admin in channel — skip force sub check
+            return False
     return False
 
 @Client.on_message(filters.private & filters.create(not_subscribed))
@@ -27,6 +32,11 @@ async def forces_sub(client, message):
                 not_joined_channels.append(channel)
         except UserNotParticipant:
             not_joined_channels.append(channel)
+        except Exception:
+            pass  # Bot not admin — skip
+
+    if not not_joined_channels:
+        return
 
     buttons = [
         [
@@ -63,6 +73,8 @@ async def check_subscription(client, callback_query: CallbackQuery):
                 not_joined_channels.append(channel)
         except UserNotParticipant:
             not_joined_channels.append(channel)
+        except Exception:
+            pass  # Bot not admin — skip
 
     if not not_joined_channels:
         new_text = "**ʏᴏᴜ ʜᴀᴠᴇ ᴊᴏɪɴᴇᴅ ᴀʟʟ ᴛʜᴇ ʀᴇǫᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟs. ᴛʜᴀɴᴋ ʏᴏᴜ! 😊 /start ɴᴏᴡ**"
