@@ -400,8 +400,9 @@ async def compress_select(client, query):
             task["compress_level"] = level
             await encode_queue.put(task)
             label = "Skip" if level == "skip" else level.capitalize()
+            compress_note = "" if level == "skip" else f" (encode+compress merged ✅)"
             await query.message.edit_text(
-                f"📥 Added to Encode Queue\n\n🎬 {task['quality']} | ⚡ {task['preset']} | 🗜️ {label}"
+                f"📥 Added to Encode Queue\n\n🎬 {task['quality']} | ⚡ {task['preset']} | 🗜️ {label}{compress_note}"
             )
             return
 
@@ -519,10 +520,25 @@ async def start_encode(client, task):
     # Duration nikalo for bitrate calculation
     duration = get_video_duration(file_path)
 
+    # Compress level — agar select hai toh encode bitrate hi adjust karo, alag pass nahi
+    compress_level = task.get("compress_level", "skip")
+    compress_ratio = {
+        "low":    0.85,
+        "medium": 0.65,
+        "high":   0.45,
+        "best":   0.30,
+        "skip":   1.0,
+    }
+    ratio = compress_ratio.get(compress_level, 1.0)
+
     if duration and duration > 0:
-        video_bitrate = calc_video_bitrate(duration, quality)
-        max_bitrate = calc_max_bitrate(duration, quality)
-        logger.info(f"[{task['id']}] Duration={duration:.1f}s | target_bitrate={video_bitrate}k | max_bitrate={max_bitrate}k")
+        video_bitrate = int(calc_video_bitrate(duration, quality) * ratio)
+        max_bitrate = int(calc_max_bitrate(duration, quality) * ratio)
+        # Floor enforce karo
+        min_floor = MIN_BITRATE.get(quality, 350)
+        video_bitrate = max(video_bitrate, min_floor)
+        max_bitrate = max(max_bitrate, int(video_bitrate * 1.4))
+        logger.info(f"[{task['id']}] Duration={duration:.1f}s | bitrate={video_bitrate}k | max={max_bitrate}k | compress={compress_level}")
         use_bitrate = True
     else:
         logger.warning(f"[{task['id']}] Duration detect nahi hui, CRF fallback")
@@ -540,6 +556,7 @@ async def start_encode(client, task):
         cmd = [
             "ffmpeg",
             "-progress", "pipe:1",
+            "-stats_period", "3",
             "-nostats",
             "-threads", threads,
             "-i", file_path,
@@ -562,6 +579,7 @@ async def start_encode(client, task):
         cmd = [
             "ffmpeg",
             "-progress", "pipe:1",
+            "-stats_period", "3",
             "-nostats",
             "-threads", threads,
             "-i", file_path,
@@ -598,10 +616,13 @@ async def start_encode(client, task):
 
     asyncio.create_task(drain_stderr(process))
 
-    progress = 0
     last_edit_time = 0
     encode_start = time.time()
     patience_index = 0
+    duration_us = int(duration * 1_000_000) if duration else 0
+    progress = 0
+
+    logger.info(f"[{task['id']}] Reading stdout progress... duration_us={duration_us}")
 
     while True:
 
@@ -619,26 +640,31 @@ async def start_encode(client, task):
         if not line:
             break
 
-        text = line.decode("utf-8")
+        text = line.decode("utf-8").strip()
 
-        if "out_time=" in text:
+        # Real progress — out_time_us se actual % nikalo
+        if text.startswith("out_time_us="):
+            try:
+                out_us = int(text.split("=")[1])
+                if duration_us > 0:
+                    progress = min(int(out_us * 100 / duration_us), 99)
+                else:
+                    progress = 0
+            except:
+                pass
 
-            progress = min(progress + 2, 100)
             now = time.time()
             elapsed = int(now - encode_start)
 
-            if now - last_edit_time >= 15:
+            if now - last_edit_time >= 8:
                 last_edit_time = now
                 filled = "⬢" * (progress // 10)
                 empty = "⬡" * (10 - progress // 10)
 
-                # 45 sec se zyada ho toh patience message dikhao
                 if elapsed > 45:
                     patience = PATIENCE_MSGS[patience_index % len(PATIENCE_MSGS)]
                     patience_index += 1
-                    status_text = (
-                        f"⚙️ Encoding...\n\n{filled}{empty} {progress}%\n\n{patience}"
-                    )
+                    status_text = f"⚙️ Encoding...\n\n{filled}{empty} {progress}%\n\n{patience}"
                 else:
                     status_text = f"⚙️ Encoding...\n\n{filled}{empty} {progress}%"
 
@@ -719,162 +745,6 @@ async def start_encode(client, task):
         os.rename(meta_file, name)
     else:
         os.rename(encoded, name)
-
-    # ---------------- COMPRESS ----------------
-    compress_level = task.get("compress_level", "skip")
-
-    if compress_level != "skip":
-        compress_file = f"compressed_{task['id']}.mkv"
-
-        # Compress target: encode ke target size ka percentage
-        compress_ratio = {
-            "low":    0.85,   # 15% smaller
-            "medium": 0.65,   # 35% smaller
-            "high":   0.45,   # 55% smaller
-            "best":   0.30,   # 70% smaller
-        }
-        ratio = compress_ratio.get(compress_level, 0.65)
-        target_mb = TARGET_SIZE_MB.get(quality, 150)
-        comp_target_mb = target_mb * ratio
-
-        # Duration se bitrate calculate karo (already mila hua hai upar se)
-        if duration and duration > 0:
-            comp_total_kbps = (comp_target_mb * 8 * 1024 * 1024 / duration) / 1000
-            comp_video_kbps = max(int(comp_total_kbps - 128), 150)
-            comp_max_kbps = int(comp_video_kbps * 1.2)
-            logger.info(f"[{task['id']}] Compress | level={compress_level} | target={comp_target_mb:.1f}MB | bitrate={comp_video_kbps}k")
-            compress_cmd = [
-                "ffmpeg",
-                "-progress", "pipe:1",
-                "-nostats",
-                "-i", name,
-                "-map", "0",
-                "-c:v", "libx265",
-                "-preset", "ultrafast",
-                "-b:v", f"{comp_video_kbps}k",
-                "-maxrate", f"{comp_max_kbps}k",
-                "-bufsize", f"{comp_max_kbps * 2}k",
-                "-x265-params", f"log-level=error:aq-mode=1:vbv-maxrate={comp_max_kbps}:vbv-bufsize={comp_max_kbps * 2}",
-                "-c:a", "copy",
-                "-c:s", "copy",
-                "-y",
-                compress_file
-            ]
-        else:
-            # Fallback: CRF based
-            crf_add = COMPRESS_LEVELS[compress_level]["crf_add"]
-            compress_crf = min(crf + crf_add, 35)
-            logger.info(f"[{task['id']}] Compress CRF fallback | level={compress_level} crf={compress_crf}")
-            compress_cmd = [
-                "ffmpeg",
-                "-progress", "pipe:1",
-                "-nostats",
-                "-i", name,
-                "-map", "0",
-                "-c:v", "libx265",
-                "-preset", "veryfast",
-                "-crf", str(compress_crf),
-                "-x265-params", "log-level=error",
-                "-c:a", "copy",
-                "-c:s", "copy",
-                "-y",
-                compress_file
-            ]
-
-        logger.info(f"[{task['id']}] Compress started | level={compress_level}")
-        await progress_msg.edit(
-            f"🗜️ Compressing... [{compress_level.upper()}]\n\n⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡ 0%",
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("❌ Cancel", callback_data=f"cancel|{task['id']}|{user_id}")]]
-            )
-        )
-
-        compress_process = await asyncio.create_subprocess_exec(
-            *compress_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-
-        asyncio.create_task(drain_stderr(compress_process))
-
-        comp_progress = 0
-        last_comp_edit = 0
-        comp_start = time.time()
-        comp_patience_index = 0
-
-        while True:
-            if cancel_tasks.get(task['id']):
-                compress_process.kill()
-                await progress_msg.edit("❌ Compress Cancelled")
-                for f in [file_path, name, compress_file, thumb]:
-                    try:
-                        if f and os.path.exists(f):
-                            os.remove(f)
-                    except:
-                        pass
-                return
-
-            try:
-                line = await asyncio.wait_for(compress_process.stdout.readline(), timeout=60)
-            except asyncio.TimeoutError:
-                logger.warning(f"[{task['id']}] Compress stdout timeout — breaking")
-                break
-
-            if not line:
-                break
-
-            text = line.decode("utf-8")
-            if "out_time=" in text:
-                comp_progress = min(comp_progress + 2, 100)
-                now = time.time()
-                elapsed = int(now - comp_start)
-
-                if now - last_comp_edit >= 15:
-                    last_comp_edit = now
-                    filled = "⬢" * (comp_progress // 10)
-                    empty = "⬡" * (10 - comp_progress // 10)
-
-                    if elapsed > 45:
-                        patience = PATIENCE_MSGS[comp_patience_index % len(PATIENCE_MSGS)]
-                        comp_patience_index += 1
-                        status_text = (
-                            f"🗜️ Compressing... [{compress_level.upper()}]\n\n"
-                            f"{filled}{empty} {comp_progress}%\n\n{patience}"
-                        )
-                    else:
-                        status_text = f"🗜️ Compressing... [{compress_level.upper()}]\n\n{filled}{empty} {comp_progress}%"
-
-                    try:
-                        await progress_msg.edit(
-                            status_text,
-                            reply_markup=InlineKeyboardMarkup(
-                                [[InlineKeyboardButton("❌ Cancel", callback_data=f"cancel|{task['id']}|{user_id}")]]
-                            )
-                        )
-                    except FloodWait as e:
-                        last_comp_edit = time.time() + e.value
-                    except:
-                        pass
-
-        try:
-            await asyncio.wait_for(compress_process.wait(), timeout=120)
-        except asyncio.TimeoutError:
-            logger.warning(f"[{task['id']}] Compress wait timeout, killing")
-            compress_process.kill()
-
-        try:
-            await progress_msg.edit(f"🗜️ Compressing... [{compress_level.upper()}]\n\n⬢⬢⬢⬢⬢⬢⬢⬢⬢⬢ 100% ✅")
-        except:
-            pass
-
-        if os.path.exists(compress_file):
-            os.remove(name)
-            os.rename(compress_file, name)
-            logger.info(f"[{task['id']}] Compress complete")
-        else:
-            logger.warning(f"[{task['id']}] Compress failed, using encoded file")
-    else:
-        logger.info(f"[{task['id']}] Compress skipped")
 
     # ---------------- THUMB ----------------
     thumb = None
