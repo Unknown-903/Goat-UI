@@ -40,10 +40,26 @@ RESOLUTIONS = {
 }
 
 DEFAULT_CRF = {
-    "480p": 24,
-    "720p": 23,
-    "1080p": 22,
-    "4k": 20
+    "480p": 28,
+    "720p": 26,
+    "1080p": 24,
+    "4k": 22
+}
+
+# Target size in MB (best/ideal range)
+TARGET_SIZE_MB = {
+    "480p":  55,   # best 50-60mb,  max 100mb
+    "720p":  150,  # best 140-160mb, max 200mb
+    "1080p": 240,  # best 230-250mb, max 300mb
+    "4k":    600,
+}
+
+# Max size hard limit in MB
+MAX_SIZE_MB = {
+    "480p":  95,
+    "720p":  190,
+    "1080p": 290,
+    "4k":    900,
 }
 
 PRESETS = [
@@ -62,6 +78,46 @@ COMPRESS_LEVELS = {
     "high":   {"crf_add": 8,  "label": "🟠 High"},
     "best":   {"crf_add": 12, "label": "🔴 Best"},
 }
+
+
+def get_video_duration(file_path):
+    """ffprobe se video duration seconds mein nikalo"""
+    import subprocess
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                file_path
+            ],
+            capture_output=True, text=True, timeout=30
+        )
+        return float(result.stdout.strip())
+    except:
+        return None
+
+
+def calc_video_bitrate(duration_sec, quality, audio_bitrate_kbps=128):
+    """
+    Target size se video bitrate calculate karo.
+    Formula: bitrate = (target_MB * 8 * 1024) / duration_sec - audio_kbps
+    """
+    target_mb = TARGET_SIZE_MB.get(quality, 150)
+    target_bits = target_mb * 8 * 1024 * 1024  # bits
+    total_kbps = (target_bits / duration_sec) / 1000
+    video_kbps = int(total_kbps - audio_bitrate_kbps)
+    # Minimum floor
+    min_kbps = {"480p": 300, "720p": 600, "1080p": 1200, "4k": 3000}
+    return max(video_kbps, min_kbps.get(quality, 300))
+
+
+def calc_max_bitrate(duration_sec, quality, audio_bitrate_kbps=128):
+    """Hard limit ke liye maxrate calculate karo"""
+    max_mb = MAX_SIZE_MB.get(quality, 200)
+    max_bits = max_mb * 8 * 1024 * 1024
+    total_kbps = (max_bits / duration_sec) / 1000
+    return int(total_kbps - audio_bitrate_kbps)
 
 # Patience messages — time lag raha ho toh dikhao
 PATIENCE_MSGS = [
@@ -233,15 +289,15 @@ async def get_rename(client, message):
         [
             InlineKeyboardButton("🔥 veryfast", callback_data=f"preset|{task['id']}|veryfast"),
             InlineKeyboardButton("⚙️ fast", callback_data=f"preset|{task['id']}|fast")
-        ],
-        [
-            InlineKeyboardButton("🐢 medium", callback_data=f"preset|{task['id']}|medium"),
-            InlineKeyboardButton("💎 slow", callback_data=f"preset|{task['id']}|slow")
         ]
     ])
 
     await message.reply_text(
-        "⚡ Select Encoding Speed",
+        "⚡ Select Encoding Speed\n\n"
+        "⚡ ultrafast — sabse fast, ~10-15 min\n"
+        "🚀 superfast — fast, ~15-20 min\n"
+        "🔥 veryfast — balanced, ~20-30 min\n"
+        "⚙️ fast — better quality, ~35-45 min",
         reply_markup=buttons
     )
 
@@ -276,13 +332,16 @@ async def rename_no(client, query):
         [
             InlineKeyboardButton("🔥 veryfast", callback_data=f"preset|{task['id']}|veryfast"),
             InlineKeyboardButton("⚙️ fast", callback_data=f"preset|{task['id']}|fast")
-        ],
-        [
-            InlineKeyboardButton("🐢 medium", callback_data=f"preset|{task['id']}|medium"),
-            InlineKeyboardButton("💎 slow", callback_data=f"preset|{task['id']}|slow")
         ]
     ])
-    await query.message.edit_text("Select Encoding Speed", reply_markup=buttons)
+    await query.message.edit_text(
+        "⚡ Select Encoding Speed\n\n"
+        "⚡ ultrafast — sabse fast, ~10-15 min\n"
+        "🚀 superfast — fast, ~15-20 min\n"
+        "🔥 veryfast — balanced, ~20-30 min\n"
+        "⚙️ fast — better quality, ~35-45 min",
+        reply_markup=buttons
+    )
 
 
 # ================= PRESET SELECT =================
@@ -452,25 +511,72 @@ async def start_encode(client, task):
         )
     )
 
-    cmd = [
-        "ffmpeg",
-        "-progress", "pipe:1",
-        "-nostats",
-        "-i", file_path,
-        "-map", "0",
-        "-vf", f"scale={scale}:flags=lanczos",
-        "-c:v", "libx265",
-        "-preset", preset,
-        "-crf", str(crf),
-        "-x265-params", "log-level=error:me=star:subme=4:ref=4:aq-mode=3:deblock=-1,-1",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-ac", "2",
-        "-c:s", "copy",
-        "-tag:v", "hvc1",
-        "-y",
-        encoded
-    ]
+    # Duration nikalo for bitrate calculation
+    duration = get_video_duration(file_path)
+
+    if duration and duration > 0:
+        video_bitrate = calc_video_bitrate(duration, quality)
+        max_bitrate = calc_max_bitrate(duration, quality)
+        logger.info(f"[{task['id']}] Duration={duration:.1f}s | target_bitrate={video_bitrate}k | max_bitrate={max_bitrate}k")
+        use_bitrate = True
+    else:
+        logger.warning(f"[{task['id']}] Duration detect nahi hui, CRF fallback")
+        use_bitrate = False
+
+    # Preset ke hisaab se x265 params — fast presets pe heavy params lagana bakwaas hai
+    fast_presets = {"ultrafast", "superfast", "veryfast"}
+    if preset in fast_presets:
+        x265_base = "log-level=error:aq-mode=0:no-sao=1:no-deblock=1"
+    else:
+        x265_base = "log-level=error:aq-mode=1:me=hex:subme=1:ref=1"
+
+    # CPU threads limit — server pe zyada threads = slow (context switching)
+    threads = "4"
+
+    if use_bitrate:
+        x265_params = f"{x265_base}:vbv-maxrate={max_bitrate}:vbv-bufsize={max_bitrate * 2}"
+        cmd = [
+            "ffmpeg",
+            "-progress", "pipe:1",
+            "-nostats",
+            "-threads", threads,
+            "-i", file_path,
+            "-map", "0",
+            "-vf", f"scale={scale}:flags=bilinear",
+            "-c:v", "libx265",
+            "-preset", preset,
+            "-b:v", f"{video_bitrate}k",
+            "-maxrate", f"{max_bitrate}k",
+            "-bufsize", f"{max_bitrate * 2}k",
+            "-x265-params", x265_params,
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-c:s", "copy",
+            "-tag:v", "hvc1",
+            "-y",
+            encoded
+        ]
+    else:
+        x265_params = x265_base
+        cmd = [
+            "ffmpeg",
+            "-progress", "pipe:1",
+            "-nostats",
+            "-threads", threads,
+            "-i", file_path,
+            "-map", "0",
+            "-vf", f"scale={scale}:flags=bilinear",
+            "-c:v", "libx265",
+            "-preset", preset,
+            "-crf", str(crf),
+            "-x265-params", x265_params,
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-c:s", "copy",
+            "-tag:v", "hvc1",
+            "-y",
+            encoded
+        ]
 
     logger.info(f"[{task['id']}] Encode started | quality={quality} preset={preset} crf={crf}")
     process = await asyncio.create_subprocess_exec(
@@ -574,30 +680,27 @@ async def start_encode(client, task):
 
     name = os.path.splitext(name)[0] + ".mkv"
 
-    os.rename(encoded, name)
-
-    # ---------------- METADATA ----------------
+    # ---------------- METADATA (encode ke saath hi) ----------------
     title = await codeflixbots.get_title(user_id) or ""
     author = await codeflixbots.get_author(user_id) or ""
     artist = await codeflixbots.get_artist(user_id) or ""
 
     meta_file = f"meta_{task['id']}.mkv"
 
+    logger.info(f"[{task['id']}] Adding metadata via remux (fast copy)")
+    await progress_msg.edit("🏷️ Applying Metadata...")
+
     meta_cmd = [
         "ffmpeg",
-        "-i", name,
+        "-i", encoded,
         "-map", "0",
         "-c", "copy",
         "-metadata", f"title={title}",
         "-metadata", f"author={author}",
         "-metadata", f"artist={artist}",
-        "-metadata", "encoder=SharkToonsIndia",
         "-y",
         meta_file
     ]
-
-    logger.info(f"[{task['id']}] Adding metadata")
-    await progress_msg.edit("🗜️ Adding Metadata...")
 
     meta_process = await asyncio.create_subprocess_exec(
         *meta_cmd,
@@ -605,44 +708,85 @@ async def start_encode(client, task):
         stderr=asyncio.subprocess.PIPE
     )
     try:
-        await asyncio.wait_for(meta_process.wait(), timeout=60)
+        await asyncio.wait_for(meta_process.wait(), timeout=120)
     except asyncio.TimeoutError:
         meta_process.kill()
 
-    os.remove(name)
-    os.rename(meta_file, name)
+    # metadata success hogi toh meta_file use karo, warna encoded directly
+    if os.path.exists(meta_file) and os.path.getsize(meta_file) > 0:
+        os.remove(encoded)
+        os.rename(meta_file, name)
+    else:
+        os.rename(encoded, name)
 
     # ---------------- COMPRESS ----------------
     compress_level = task.get("compress_level", "skip")
 
     if compress_level != "skip":
-        crf_add = COMPRESS_LEVELS[compress_level]["crf_add"]
-        compress_crf = min(crf + crf_add, 35)
         compress_file = f"compressed_{task['id']}.mkv"
 
-        logger.info(f"[{task['id']}] Compress started | level={compress_level} crf={compress_crf}")
+        # Compress target: encode ke target size ka percentage
+        compress_ratio = {
+            "low":    0.85,   # 15% smaller
+            "medium": 0.65,   # 35% smaller
+            "high":   0.45,   # 55% smaller
+            "best":   0.30,   # 70% smaller
+        }
+        ratio = compress_ratio.get(compress_level, 0.65)
+        target_mb = TARGET_SIZE_MB.get(quality, 150)
+        comp_target_mb = target_mb * ratio
+
+        # Duration se bitrate calculate karo (already mila hua hai upar se)
+        if duration and duration > 0:
+            comp_total_kbps = (comp_target_mb * 8 * 1024 * 1024 / duration) / 1000
+            comp_video_kbps = max(int(comp_total_kbps - 128), 150)
+            comp_max_kbps = int(comp_video_kbps * 1.2)
+            logger.info(f"[{task['id']}] Compress | level={compress_level} | target={comp_target_mb:.1f}MB | bitrate={comp_video_kbps}k")
+            compress_cmd = [
+                "ffmpeg",
+                "-progress", "pipe:1",
+                "-nostats",
+                "-i", name,
+                "-map", "0",
+                "-c:v", "libx265",
+                "-preset", "ultrafast",
+                "-b:v", f"{comp_video_kbps}k",
+                "-maxrate", f"{comp_max_kbps}k",
+                "-bufsize", f"{comp_max_kbps * 2}k",
+                "-x265-params", f"log-level=error:aq-mode=1:vbv-maxrate={comp_max_kbps}:vbv-bufsize={comp_max_kbps * 2}",
+                "-c:a", "copy",
+                "-c:s", "copy",
+                "-y",
+                compress_file
+            ]
+        else:
+            # Fallback: CRF based
+            crf_add = COMPRESS_LEVELS[compress_level]["crf_add"]
+            compress_crf = min(crf + crf_add, 35)
+            logger.info(f"[{task['id']}] Compress CRF fallback | level={compress_level} crf={compress_crf}")
+            compress_cmd = [
+                "ffmpeg",
+                "-progress", "pipe:1",
+                "-nostats",
+                "-i", name,
+                "-map", "0",
+                "-c:v", "libx265",
+                "-preset", "veryfast",
+                "-crf", str(compress_crf),
+                "-x265-params", "log-level=error",
+                "-c:a", "copy",
+                "-c:s", "copy",
+                "-y",
+                compress_file
+            ]
+
+        logger.info(f"[{task['id']}] Compress started | level={compress_level}")
         await progress_msg.edit(
             f"🗜️ Compressing... [{compress_level.upper()}]\n\n⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡ 0%",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("❌ Cancel", callback_data=f"cancel|{task['id']}|{user_id}")]]
             )
         )
-
-        compress_cmd = [
-            "ffmpeg",
-            "-progress", "pipe:1",
-            "-nostats",
-            "-i", name,
-            "-map", "0",
-            "-c:v", "libx265",
-            "-preset", "veryfast",
-            "-crf", str(compress_crf),
-            "-x265-params", "log-level=error",
-            "-c:a", "copy",
-            "-c:s", "copy",
-            "-y",
-            compress_file
-        ]
 
         compress_process = await asyncio.create_subprocess_exec(
             *compress_cmd,
