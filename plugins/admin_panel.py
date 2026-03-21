@@ -1,4 +1,7 @@
-from config import Config, Txt
+from config import Config
+import importlib
+_start_cb = importlib.import_module("plugins.start_&_cb")
+Txt = _start_cb.Txt
 from helper.database import codeflixbots
 from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram import Client, filters
