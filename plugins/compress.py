@@ -68,13 +68,53 @@ def get_video_duration(file_path):
         return None
 
 
-def calc_compress_bitrate(file_size_bytes, duration_sec, ratio, audio_kbps=128):
-    """Original file size aur ratio se target bitrate nikalo"""
+def get_video_resolution(file_path):
+    """Video resolution detect karo — bitrate floor ke liye"""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error",
+             "-select_streams", "v:0",
+             "-show_entries", "stream=width,height",
+             "-of", "csv=p=0",
+             file_path],
+            capture_output=True, text=True, timeout=30
+        )
+        parts = result.stdout.strip().split(",")
+        if len(parts) == 2:
+            return int(parts[0]), int(parts[1])
+    except:
+        pass
+    return None, None
+
+
+def get_resolution_floor(width, height):
+    """Resolution se minimum bitrate floor nikalo"""
+    if height is None:
+        return 300
+    if height <= 480:
+        return 350
+    elif height <= 720:
+        return 700
+    elif height <= 1080:
+        return 1400
+    else:
+        return 3000
+
+
+def calc_compress_bitrate(file_size_bytes, duration_sec, ratio, width=None, height=None, audio_kbps=128):
+    """Original file size aur ratio se target bitrate nikalo — floor enforce karo"""
     target_bytes = file_size_bytes * ratio
     target_bits = target_bytes * 8
     total_kbps = (target_bits / duration_sec) / 1000
-    video_kbps = max(int(total_kbps - audio_kbps), 150)
-    max_kbps = int(video_kbps * 1.3)
+    video_kbps = int(total_kbps - audio_kbps)
+
+    # Resolution-aware floor
+    floor = get_resolution_floor(width, height)
+    video_kbps = max(video_kbps, floor)
+
+    # maxrate hamesha target se 40% zyada — kabhi target se kam nahi
+    max_kbps = int(video_kbps * 1.4)
     return video_kbps, max_kbps
 
 # ================= QUEUE =================
@@ -323,17 +363,18 @@ async def run_compress(client, task):
             await progress_msg.edit("❌ Download Cancelled")
             return
 
-        # ---------------- SIZE + DURATION ----------------
+        # ---------------- SIZE + DURATION + RESOLUTION ----------------
         orig_size = os.path.getsize(file_path)
         duration = get_video_duration(file_path)
+        width, height = get_video_resolution(file_path)
+        logger.info(f"[{task_id}] Resolution={width}x{height} | orig={round(orig_size/1024/1024,1)}MB")
 
         if duration and duration > 0:
-            video_kbps, max_kbps = calc_compress_bitrate(orig_size, duration, ratio)
+            video_kbps, max_kbps = calc_compress_bitrate(orig_size, duration, ratio, width, height)
             logger.info(f"[{task_id}] Duration={duration:.1f}s | bitrate={video_kbps}k | max={max_kbps}k")
             use_bitrate = True
         else:
             logger.warning(f"[{task_id}] Duration detect nahi hui, CRF fallback")
-            # CRF fallback mapping
             crf_map = {"low": 26, "medium": 28, "high": 31, "best": 35}
             fallback_crf = crf_map.get(task["level"], 28)
             use_bitrate = False
@@ -357,7 +398,7 @@ async def run_compress(client, task):
                 "-b:v", f"{video_kbps}k",
                 "-maxrate", f"{max_kbps}k",
                 "-bufsize", f"{max_kbps * 2}k",
-                "-x265-params", f"log-level=error:aq-mode=0:no-sao=1:no-deblock=1:vbv-maxrate={max_kbps}:vbv-bufsize={max_kbps * 2}",
+                "-x265-params", "log-level=error:aq-mode=0:no-sao=1:no-deblock=1",
                 "-c:a", "aac",
                 "-b:a", "128k",
                 "-c:s", "copy",
