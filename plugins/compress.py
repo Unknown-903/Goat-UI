@@ -385,67 +385,81 @@ async def run_compress(client, task):
             reply_markup=cancel_btn
         )
 
-        if use_bitrate:
-            cmd = [
+        # Compress level ke hisaab se scale — high/best pe resolution bhi ghataao speed ke liye
+        scale_map = {
+            "low":    None,          # original resolution rakho
+            "medium": None,          # original resolution rakho
+            "high":   "1280:720",    # 720p pe le aao
+            "best":   "854:480",     # 480p pe le aao
+        }
+        scale = scale_map.get(task["level"], None)
+        vf_filter = f"scale={scale}:flags=bilinear" if scale else None
+
+        def build_cmd(extra_video_args):
+            base = [
                 "ffmpeg",
-                "-progress", "pipe:1",
-                "-nostats",
+                "-nostdin",
                 "-threads", "4",
                 "-i", file_path,
                 "-map", "0",
+            ]
+            if vf_filter:
+                base += ["-vf", vf_filter]
+            base += [
                 "-c:v", "libx265",
                 "-preset", "ultrafast",
+            ]
+            base += extra_video_args
+            base += [
+                "-x265-params", "log-level=error:aq-mode=0:no-sao=1:no-deblock=1",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                "-c:s", "copy",
+                "-stats",
+                "-y",
+                output
+            ]
+            return base
+
+        if use_bitrate:
+            cmd = build_cmd([
                 "-b:v", f"{video_kbps}k",
                 "-maxrate", f"{max_kbps}k",
                 "-bufsize", f"{max_kbps * 2}k",
-                "-x265-params", "log-level=error:aq-mode=0:no-sao=1:no-deblock=1",
-                "-c:a", "aac",
-                "-b:a", "128k",
-                "-c:s", "copy",
-                "-y",
-                output
-            ]
+            ])
         else:
-            cmd = [
-                "ffmpeg",
-                "-progress", "pipe:1",
-                "-nostats",
-                "-threads", "4",
-                "-i", file_path,
-                "-map", "0",
-                "-c:v", "libx265",
-                "-preset", "ultrafast",
-                "-crf", str(fallback_crf),
-                "-x265-params", "log-level=error:aq-mode=0:no-sao=1:no-deblock=1",
-                "-c:a", "aac",
-                "-b:a", "128k",
-                "-c:s", "copy",
-                "-y",
-                output
-            ]
+            cmd = build_cmd(["-crf", str(fallback_crf)])
 
         logger.info(f"[{task_id}] Compress started | level={task['level']}")
 
         process = await asyncio.create_subprocess_exec(
             *cmd,
-            stdout=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE
         )
 
-        # Stderr drain karo — warna buffer full hoke hang hoga
-        async def drain_stderr(proc):
+        duration_sec = duration if duration and duration > 0 else 0
+        last_edit = 0
+        comp_progress = 0
+        _editing = False
+
+        async def safe_edit(text):
+            nonlocal _editing, last_edit
+            if _editing:
+                return
+            _editing = True
             try:
-                while True:
-                    line = await proc.stderr.readline()
-                    if not line:
-                        break
+                await progress_msg.edit(text, reply_markup=cancel_btn)
+                last_edit = time.time()
+            except FloodWait as e:
+                last_edit = time.time() + e.value
             except:
                 pass
+            finally:
+                _editing = False
 
-        asyncio.create_task(drain_stderr(process))
-
-        progress = 0
-        last_edit = 0
+        import re as _re
+        time_pattern = _re.compile(r"time=\s*(\d+):(\d+):(\d+)\.(\d+)")
 
         while True:
             if cancel_tasks.get(task_id):
@@ -454,30 +468,30 @@ async def run_compress(client, task):
                 return
 
             try:
-                line = await asyncio.wait_for(process.stdout.readline(), timeout=60)
+                line = await asyncio.wait_for(process.stderr.readline(), timeout=60)
             except asyncio.TimeoutError:
                 break
 
             if not line:
                 break
 
-            text = line.decode("utf-8")
-            if "out_time=" in text:
-                progress = min(progress + 2, 100)
+            text = line.decode("utf-8", errors="ignore")
+
+            # stderr se time= parse karo — har ffmpeg version pe kaam karta hai
+            m = time_pattern.search(text)
+            if m and duration_sec > 0:
+                h, mi, s, cs = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+                elapsed_sec = h * 3600 + mi * 60 + s + cs / 100
+                comp_progress = min(int(elapsed_sec * 100 / duration_sec), 99)
+
                 now = time.time()
                 if now - last_edit >= 8:
                     last_edit = now
-                    filled = "⬢" * (progress // 10)
-                    empty = "⬡" * (10 - progress // 10)
-                    try:
-                        await progress_msg.edit(
-                            f"🗜️ Compressing... {label}\n\n{filled}{empty} {progress}%",
-                            reply_markup=cancel_btn
-                        )
-                    except FloodWait as e:
-                        last_edit = time.time() + e.value
-                    except:
-                        pass
+                    filled = "⬢" * (comp_progress // 10)
+                    empty = "⬡" * (10 - comp_progress // 10)
+                    asyncio.create_task(safe_edit(
+                        f"🗜️ Compressing... {label}\n\n{filled}{empty} {comp_progress}%"
+                    ))
 
         try:
             await asyncio.wait_for(process.wait(), timeout=120)
