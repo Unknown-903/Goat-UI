@@ -46,20 +46,28 @@ DEFAULT_CRF = {
     "4k": 22
 }
 
-# Target size in MB (best/ideal range)
-TARGET_SIZE_MB = {
-    "480p":  55,   # best 50-60mb,  max 100mb
-    "720p":  150,  # best 140-160mb, max 200mb
-    "1080p": 240,  # best 230-250mb, max 300mb
-    "4k":    600,
+# Minimum bitrate floor (kbps) — inse niche kabhi nahi jaana
+MIN_BITRATE = {
+    "480p":  350,
+    "720p":  700,
+    "1080p": 1400,
+    "4k":    3000,
 }
 
-# Max size hard limit in MB
-MAX_SIZE_MB = {
-    "480p":  95,
-    "720p":  190,
-    "1080p": 290,
-    "4k":    900,
+# Maximum bitrate ceiling (kbps) — inse upar kabhi nahi jaana
+MAX_BITRATE = {
+    "480p":  1200,
+    "720p":  2500,
+    "1080p": 4500,
+    "4k":    9000,
+}
+
+# Base size per minute (MB/min) — duration ke saath scale hoga
+SIZE_PER_MIN = {
+    "480p":  2.5,   # ~50MB for 20min, ~120MB for 48min
+    "720p":  5.0,   # ~100MB for 20min, ~240MB for 48min
+    "1080p": 8.5,   # ~170MB for 20min, ~408MB for 48min
+    "4k":    20.0,
 }
 
 PRESETS = [
@@ -99,25 +107,22 @@ def get_video_duration(file_path):
 
 
 def calc_video_bitrate(duration_sec, quality, audio_bitrate_kbps=128):
-    """
-    Target size se video bitrate calculate karo.
-    Formula: bitrate = (target_MB * 8 * 1024) / duration_sec - audio_kbps
-    """
-    target_mb = TARGET_SIZE_MB.get(quality, 150)
-    target_bits = target_mb * 8 * 1024 * 1024  # bits
+    """Duration ke hisaab se adaptive bitrate — chhoti file chhoti, badi file badi"""
+    minutes = duration_sec / 60
+    target_mb = SIZE_PER_MIN.get(quality, 5.0) * minutes
+    target_bits = target_mb * 8 * 1024 * 1024
     total_kbps = (target_bits / duration_sec) / 1000
     video_kbps = int(total_kbps - audio_bitrate_kbps)
-    # Minimum floor
-    min_kbps = {"480p": 300, "720p": 600, "1080p": 1200, "4k": 3000}
-    return max(video_kbps, min_kbps.get(quality, 300))
+    # Floor aur ceiling dono enforce karo
+    video_kbps = max(video_kbps, MIN_BITRATE.get(quality, 350))
+    video_kbps = min(video_kbps, MAX_BITRATE.get(quality, 2500))
+    return video_kbps
 
 
 def calc_max_bitrate(duration_sec, quality, audio_bitrate_kbps=128):
-    """Hard limit ke liye maxrate calculate karo"""
-    max_mb = MAX_SIZE_MB.get(quality, 200)
-    max_bits = max_mb * 8 * 1024 * 1024
-    total_kbps = (max_bits / duration_sec) / 1000
-    return int(total_kbps - audio_bitrate_kbps)
+    """maxrate hamesha target se 40% zyada — kabhi target se kam nahi"""
+    target = calc_video_bitrate(duration_sec, quality, audio_bitrate_kbps)
+    return min(int(target * 1.4), int(MAX_BITRATE.get(quality, 2500) * 1.2))
 
 # Patience messages — time lag raha ho toh dikhao
 PATIENCE_MSGS = [
@@ -523,18 +528,15 @@ async def start_encode(client, task):
         logger.warning(f"[{task['id']}] Duration detect nahi hui, CRF fallback")
         use_bitrate = False
 
-    # Preset ke hisaab se x265 params — fast presets pe heavy params lagana bakwaas hai
     fast_presets = {"ultrafast", "superfast", "veryfast"}
     if preset in fast_presets:
-        x265_base = "log-level=error:aq-mode=0:no-sao=1:no-deblock=1"
+        x265_params = "log-level=error:aq-mode=0:no-sao=1:no-deblock=1"
     else:
-        x265_base = "log-level=error:aq-mode=1:me=hex:subme=1:ref=1"
+        x265_params = "log-level=error:aq-mode=1:me=hex:subme=1:ref=1"
 
-    # CPU threads limit — server pe zyada threads = slow (context switching)
     threads = "4"
 
     if use_bitrate:
-        x265_params = f"{x265_base}:vbv-maxrate={max_bitrate}:vbv-bufsize={max_bitrate * 2}"
         cmd = [
             "ffmpeg",
             "-progress", "pipe:1",
@@ -557,7 +559,6 @@ async def start_encode(client, task):
             encoded
         ]
     else:
-        x265_params = x265_base
         cmd = [
             "ffmpeg",
             "-progress", "pipe:1",
