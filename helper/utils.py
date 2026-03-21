@@ -2,7 +2,7 @@ import time
 import re
 from datetime import datetime
 from pytz import timezone
-from config import Config, Txt
+from config import Config
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.errors import FloodWait
 
