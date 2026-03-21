@@ -32,25 +32,50 @@ def is_admin(user_id):
 COMPRESS_LEVELS = {
     "low": {
         "label": "🟢 Low",
-        "crf": 26,
-        "desc": "~10% smaller · best quality"
+        "ratio": 0.75,   # original size ka 75% — ~25% smaller
+        "desc": "~25% smaller · best quality"
     },
     "medium": {
         "label": "🟡 Medium",
-        "crf": 28,
-        "desc": "~30% smaller · good quality"
+        "ratio": 0.55,   # ~45% smaller
+        "desc": "~45% smaller · good quality"
     },
     "high": {
         "label": "🟠 High",
-        "crf": 31,
-        "desc": "~50% smaller · decent quality"
+        "ratio": 0.38,   # ~62% smaller
+        "desc": "~60% smaller · decent quality"
     },
     "best": {
         "label": "🔴 Best",
-        "crf": 35,
-        "desc": "~70% smaller · max compression"
+        "ratio": 0.25,   # ~75% smaller
+        "desc": "~75% smaller · max compression"
     },
 }
+
+
+def get_video_duration(file_path):
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error",
+             "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1",
+             file_path],
+            capture_output=True, text=True, timeout=30
+        )
+        return float(result.stdout.strip())
+    except:
+        return None
+
+
+def calc_compress_bitrate(file_size_bytes, duration_sec, ratio, audio_kbps=128):
+    """Original file size aur ratio se target bitrate nikalo"""
+    target_bytes = file_size_bytes * ratio
+    target_bits = target_bytes * 8
+    total_kbps = (target_bits / duration_sec) / 1000
+    video_kbps = max(int(total_kbps - audio_kbps), 150)
+    max_kbps = int(video_kbps * 1.3)
+    return video_kbps, max_kbps
 
 # ================= QUEUE =================
 
@@ -136,10 +161,10 @@ async def compress_cmd(client, message):
     await message.reply_text(
         "🗜️ **Video Compressor**\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "🟢 **Low** — ~10% smaller · best quality\n"
-        "🟡 **Medium** — ~30% smaller · good quality\n"
-        "🟠 **High** — ~50% smaller · decent quality\n"
-        "🔴 **Best** — ~70% smaller · max compression\n\n"
+        "🟢 **Low** — ~25% smaller · best quality\n"
+        "🟡 **Medium** — ~45% smaller · good quality\n"
+        "🟠 **High** — ~60% smaller · decent quality\n"
+        "🔴 **Best** — ~75% smaller · max compression\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         f"👇 **Select compression level:**{dm_note}",
         reply_markup=buttons
@@ -169,7 +194,7 @@ async def compress_level_select(client, query):
         "id": int(time.time() * 1000),
         "user": user_id,
         "level": level,
-        "crf": level_info["crf"],
+        "ratio": level_info["ratio"],
         "label": level_info["label"],
         "msg": data["msg"],
         "name": query.from_user.first_name,
@@ -261,7 +286,7 @@ async def compress_tasks_cmd(client, message):
 async def run_compress(client, task):
     msg = task["msg"]
     user_id = task["user"]
-    crf = task["crf"]
+    ratio = task["ratio"]
     label = task["label"]
     task_id = task["id"]
 
@@ -273,6 +298,7 @@ async def run_compress(client, task):
     download = f"downloads/comp_in_{task_id}.mkv"
     output = f"downloads/comp_out_{task_id}.mkv"
     file_path = None
+    thumb = None
 
     try:
         # ---------------- DOWNLOAD ----------------
@@ -297,40 +323,85 @@ async def run_compress(client, task):
             await progress_msg.edit("❌ Download Cancelled")
             return
 
+        # ---------------- SIZE + DURATION ----------------
+        orig_size = os.path.getsize(file_path)
+        duration = get_video_duration(file_path)
+
+        if duration and duration > 0:
+            video_kbps, max_kbps = calc_compress_bitrate(orig_size, duration, ratio)
+            logger.info(f"[{task_id}] Duration={duration:.1f}s | bitrate={video_kbps}k | max={max_kbps}k")
+            use_bitrate = True
+        else:
+            logger.warning(f"[{task_id}] Duration detect nahi hui, CRF fallback")
+            # CRF fallback mapping
+            crf_map = {"low": 26, "medium": 28, "high": 31, "best": 35}
+            fallback_crf = crf_map.get(task["level"], 28)
+            use_bitrate = False
+
         # ---------------- COMPRESS ----------------
         await progress_msg.edit(
             f"🗜️ Compressing... {label}\n\n⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡ 0%",
             reply_markup=cancel_btn
         )
 
-        # Get original size
-        orig_size = os.path.getsize(file_path)
+        if use_bitrate:
+            cmd = [
+                "ffmpeg",
+                "-progress", "pipe:1",
+                "-nostats",
+                "-threads", "4",
+                "-i", file_path,
+                "-map", "0",
+                "-c:v", "libx265",
+                "-preset", "ultrafast",
+                "-b:v", f"{video_kbps}k",
+                "-maxrate", f"{max_kbps}k",
+                "-bufsize", f"{max_kbps * 2}k",
+                "-x265-params", f"log-level=error:aq-mode=0:no-sao=1:no-deblock=1:vbv-maxrate={max_kbps}:vbv-bufsize={max_kbps * 2}",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                "-c:s", "copy",
+                "-y",
+                output
+            ]
+        else:
+            cmd = [
+                "ffmpeg",
+                "-progress", "pipe:1",
+                "-nostats",
+                "-threads", "4",
+                "-i", file_path,
+                "-map", "0",
+                "-c:v", "libx265",
+                "-preset", "ultrafast",
+                "-crf", str(fallback_crf),
+                "-x265-params", "log-level=error:aq-mode=0:no-sao=1:no-deblock=1",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                "-c:s", "copy",
+                "-y",
+                output
+            ]
 
-        cmd = [
-            "ffmpeg",
-            "-progress", "pipe:1",
-            "-nostats",
-            "-i", file_path,
-            "-map", "0",
-            "-c:v", "libx265",
-            "-preset", "veryfast",
-            "-crf", str(crf),
-            "-x265-params", "log-level=error",
-            "-c:a", "aac",
-            "-b:a", "128k",
-            "-ac", "2",
-            "-c:s", "copy",
-            "-y",
-            output
-        ]
-
-        logger.info(f"[{task_id}] Compress started | level={task['level']} crf={crf}")
+        logger.info(f"[{task_id}] Compress started | level={task['level']}")
 
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
+
+        # Stderr drain karo — warna buffer full hoke hang hoga
+        async def drain_stderr(proc):
+            try:
+                while True:
+                    line = await proc.stderr.readline()
+                    if not line:
+                        break
+            except:
+                pass
+
+        asyncio.create_task(drain_stderr(process))
 
         progress = 0
         last_edit = 0
@@ -341,7 +412,11 @@ async def run_compress(client, task):
                 await progress_msg.edit("❌ Compress Cancelled")
                 return
 
-            line = await process.stdout.readline()
+            try:
+                line = await asyncio.wait_for(process.stdout.readline(), timeout=60)
+            except asyncio.TimeoutError:
+                break
+
             if not line:
                 break
 
@@ -363,13 +438,15 @@ async def run_compress(client, task):
                     except:
                         pass
 
-        await process.wait()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=120)
+        except asyncio.TimeoutError:
+            process.kill()
+
         logger.info(f"[{task_id}] Compress complete")
 
         try:
-            await progress_msg.edit(
-                f"🗜️ Compressing... {label}\n\n⬢⬢⬢⬢⬢⬢⬢⬢⬢⬢ 100% ✅"
-            )
+            await progress_msg.edit(f"🗜️ Compressing... {label}\n\n⬢⬢⬢⬢⬢⬢⬢⬢⬢⬢ 100% ✅")
         except:
             pass
 
@@ -377,7 +454,6 @@ async def run_compress(client, task):
             await progress_msg.edit("❌ Compress failed — output not found")
             return
 
-        # Size comparison
         new_size = os.path.getsize(output)
         saved = orig_size - new_size
         saved_pct = round((saved / orig_size) * 100, 1) if orig_size else 0
@@ -392,7 +468,7 @@ async def run_compress(client, task):
 
         name = os.path.splitext(name)[0] + ".mkv"
 
-        # ---------------- METADATA ----------------
+        # ---------------- METADATA (fast remux — alag pass nahi) ----------------
         title = await codeflixbots.get_title(user_id) or ""
         author = await codeflixbots.get_author(user_id) or ""
         artist = await codeflixbots.get_artist(user_id) or ""
@@ -406,26 +482,27 @@ async def run_compress(client, task):
             "-metadata", f"title={title}",
             "-metadata", f"author={author}",
             "-metadata", f"artist={artist}",
-            "-metadata", "encoder=SharkToonsIndia",
             "-y", meta_file
         ]
 
-        await progress_msg.edit("🗜️ Adding metadata...")
+        await progress_msg.edit("🏷️ Applying metadata...")
         meta_proc = await asyncio.create_subprocess_exec(
             *meta_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        await meta_proc.wait()
+        try:
+            await asyncio.wait_for(meta_proc.wait(), timeout=120)
+        except asyncio.TimeoutError:
+            meta_proc.kill()
 
-        if os.path.exists(meta_file):
+        if os.path.exists(meta_file) and os.path.getsize(meta_file) > 0:
             os.remove(output)
             output_final = meta_file
         else:
             output_final = output
 
         # ---------------- THUMB ----------------
-        thumb = None
         thumb_id = await codeflixbots.get_thumbnail(user_id)
         if thumb_id:
             try:
@@ -447,22 +524,17 @@ async def run_compress(client, task):
             f"📄 `{name}`"
         )
 
-        await progress_msg.edit(
-            "📤 Uploading...",
-            reply_markup=cancel_btn
-        )
-
+        await progress_msg.edit("📤 Uploading...", reply_markup=cancel_btn)
         start_time = time.time()
         logger.info(f"[{task_id}] Upload started")
 
-        # Hamesha DM mein bhejo — group ho ya private
         while True:
             if cancel_tasks.get(task_id):
                 await progress_msg.edit("❌ Upload Cancelled")
                 return
             try:
                 await client.send_document(
-                    chat_id=user_id,  # hamesha DM
+                    chat_id=user_id,
                     document=output_final,
                     file_name=name,
                     caption=caption,
@@ -486,7 +558,7 @@ async def run_compress(client, task):
 
     finally:
         cancel_tasks.pop(task_id, None)
-        for f in [file_path, output, meta_file if 'meta_file' in dir() else None, thumb]:
+        for f in [file_path, output, f"downloads/meta_{task_id}.mkv", thumb]:
             try:
                 if f and os.path.exists(f):
                     os.remove(f)
