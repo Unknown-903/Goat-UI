@@ -621,6 +621,27 @@ async def start_encode(client, task):
     patience_index = 0
     duration_us = int(duration * 1_000_000) if duration else 0
     progress = 0
+    _enc_editing = False
+
+    async def safe_enc_edit(text):
+        nonlocal _enc_editing, last_edit_time
+        if _enc_editing:
+            return
+        _enc_editing = True
+        try:
+            await progress_msg.edit(
+                text,
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("❌ Cancel", callback_data=f"cancel|{task['id']}|{user_id}")]]
+                )
+            )
+            last_edit_time = time.time()
+        except FloodWait as e:
+            last_edit_time = time.time() + e.value
+        except:
+            pass
+        finally:
+            _enc_editing = False
 
     logger.info(f"[{task['id']}] Reading stdout progress... duration_us={duration_us}")
 
@@ -642,7 +663,6 @@ async def start_encode(client, task):
 
         text = line.decode("utf-8").strip()
 
-        # Real progress — out_time_us se actual % nikalo
         if text.startswith("out_time_us="):
             try:
                 out_us = int(text.split("=")[1])
@@ -656,8 +676,8 @@ async def start_encode(client, task):
             now = time.time()
             elapsed = int(now - encode_start)
 
-            if now - last_edit_time >= 8:
-                last_edit_time = now
+            if now - last_edit_time >= 10:
+                last_edit_time = now  # turant update — multiple tasks na ban
                 filled = "⬢" * (progress // 10)
                 empty = "⬡" * (10 - progress // 10)
 
@@ -668,17 +688,7 @@ async def start_encode(client, task):
                 else:
                     status_text = f"⚙️ Encoding...\n\n{filled}{empty} {progress}%"
 
-                try:
-                    await progress_msg.edit(
-                        status_text,
-                        reply_markup=InlineKeyboardMarkup(
-                            [[InlineKeyboardButton("❌ Cancel", callback_data=f"cancel|{task['id']}|{user_id}")]]
-                        )
-                    )
-                except FloodWait as e:
-                    last_edit_time = time.time() + e.value
-                except:
-                    pass
+                asyncio.create_task(safe_enc_edit(status_text))
 
     # stderr already drained via drain_stderr task
     # wait_for prevents indefinite hang
