@@ -28,7 +28,7 @@ class Config(object):
 
     START_PIC = os.environ.get(
         "START_PIC",
-        "https://graph.org/file/29a3acbbab9de5f45a5fe.jpg"
+        "https://i.ibb.co/jZDxWgmk/dbffcd55fcb3.jpg"
     )
 
     # ================= ADMINS =================
