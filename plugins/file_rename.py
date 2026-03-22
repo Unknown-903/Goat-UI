@@ -109,14 +109,15 @@ async def admin_list(client, message):
 # ================= REGEX =================
 
 SEASON_EPISODE_PATTERN = re.compile(
-    r"[Ss][ ._\-]?(\d{1,3})[ ._\-]?[Ee][ ._\-]?(\d{1,3})|" 
-    r"[Ss](\d{1,3})[ ._\-]+(\d{1,3})|" 
-    r"(\d{1,3})x(\d{1,3})|" 
-    r"[Ee]pisode[ ._\-]?(\d{1,3})",
+    r"[Ss][ ._\-]?(\d{1,3})[ ._\-]?[Ee][ ._\-]?(\d{1,3})|"  # S01E01, S01-E01
+    r"[Ss](\d{1,3})[ ._\-]+(\d{1,3})|"                        # S01 01
+    r"(\d{1,3})x(\d{1,3})|"                                   # 1x01
+    r"[Ee]p?[ ._\-]?(\d{1,3})|"                               # Ep01, E01, Episode 01
+    r"[Ee]pisode[ ._\-]?(\d{1,3})",                           # Episode 01
     re.IGNORECASE
 )
 
-QUALITY_PATTERN = re.compile(r"(\d{2,4}p)", re.IGNORECASE)
+QUALITY_PATTERN = re.compile(r"(\d{3,4}p)", re.IGNORECASE)
 
 
 # ================= PROGRESS =================
@@ -201,25 +202,26 @@ def TimeFormatter(milliseconds):
 # ================= HELPERS =================
 
 def extract_season_episode(filename):
-
     match = SEASON_EPISODE_PATTERN.search(filename)
-
     if not match:
         return None, None
 
     g = match.groups()
-
+    # Group 0,1: S01E01
     if g[0] and g[1]:
         return g[0].zfill(2), g[1].zfill(2)
-
+    # Group 2,3: S01 01
     if g[2] and g[3]:
         return g[2].zfill(2), g[3].zfill(2)
-
+    # Group 4,5: 1x01
     if g[4] and g[5]:
         return g[4].zfill(2), g[5].zfill(2)
-
+    # Group 6: Ep01 / E01
     if g[6]:
         return "01", g[6].zfill(2)
+    # Group 7: Episode 01
+    if g[7]:
+        return "01", g[7].zfill(2)
 
     return None, None
 
@@ -439,12 +441,13 @@ async def restart_bot(client, message):
 # ================= LOGS COMMAND =================
 
 class TelegramLogHandler(logging.Handler):
-    """Log messages ko Telegram pe bhejta hai"""
-    def __init__(self):
+    """Log messages ko buffer mein store karta hai"""
+    def __init__(self, maxlen=300):
         super().__init__()
+        self._buffer = []
+        self._maxlen = maxlen
         self._client = None
         self._target = None
-        self._buffer = []
         self._active = False
 
     def setup(self, client, target):
@@ -458,17 +461,21 @@ class TelegramLogHandler(logging.Handler):
         self._target = None
 
     def emit(self, record):
-        if self._active and self._client and self._target:
-            try:
-                msg = self.format(record)
-                self._buffer.append(msg)
-            except:
-                pass
+        try:
+            msg = self.format(record)
+            self._buffer.append(msg)
+            if len(self._buffer) > self._maxlen:
+                self._buffer = self._buffer[-self._maxlen:]
+        except:
+            pass
+
 
 telegram_log_handler = TelegramLogHandler()
 telegram_log_handler.setFormatter(
     logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
 )
+# Hamesha root logger pe lagao — taki buffer mein logs aate rahen
+logging.getLogger().addHandler(telegram_log_handler)
 
 
 @Client.on_message((filters.private | filters.group) & filters.command("logs"))
@@ -480,84 +487,70 @@ async def send_logs(client, message):
         return await message.reply_text("❌ Only admins and owner can use this command")
 
     args = message.text.split()
+    sub = args[1].lower() if len(args) > 1 else ""
 
     # /logs stop
-    if len(args) > 1 and args[1] == "stop":
+    if sub == "stop":
         if telegram_log_handler._active:
             telegram_log_handler.stop()
-            logging.getLogger().removeHandler(telegram_log_handler)
             await message.reply_text("🔕 Log streaming stopped")
         else:
             await message.reply_text("ℹ️ Log streaming is not active")
         return
 
-    # /logs — last logs file se bhejo
-    log_lines = []
-    try:
-        # Try reading from log buffer first
-        if telegram_log_handler._buffer:
-            log_lines = telegram_log_handler._buffer[-50:]
-        else:
-            # Fallback: recent log messages collect karo
-            log_lines = ["No recent logs buffered. Start streaming with /logs stream"]
-    except:
-        log_lines = ["Could not read logs"]
-
-    if len(args) > 1 and args[1] == "stream":
-        # Start live streaming
+    # /logs stream
+    if sub == "stream":
         if telegram_log_handler._active:
             await message.reply_text("ℹ️ Already streaming logs to this chat")
             return
         telegram_log_handler.setup(client, message.chat.id)
-        logging.getLogger().addHandler(telegram_log_handler)
         await message.reply_text(
             "📡 **Log streaming started**\n\n"
             "Logs will be sent here in real-time\n"
             "Use `/logs stop` to stop streaming"
         )
-        # Start async sender
         asyncio.create_task(_send_log_buffer(client, message.chat.id))
         return
 
-    # Show recent buffered logs
-    if log_lines:
-        text = "📋 **Recent Logs**\n\n`" + "\n".join(log_lines[-30:]) + "`"
-        # Telegram message limit 4096 chars
+    # /logs — recent buffered logs dikhao
+    if telegram_log_handler._buffer:
+        lines = telegram_log_handler._buffer[-30:]
+        text = "📋 **Recent Logs**\n\n`" + "\n".join(lines) + "`"
         if len(text) > 4000:
-            text = "📋 **Recent Logs**\n\n`" + "\n".join(log_lines[-10:]) + "`"
+            lines = telegram_log_handler._buffer[-10:]
+            text = "📋 **Recent Logs**\n\n`" + "\n".join(lines) + "`"
         await message.reply_text(text)
     else:
         await message.reply_text(
-            "📋 No logs buffered yet\n\n"
-            "Use `/logs stream` to start live log streaming"
+            "📋 No logs yet\n\n"
+            "Use `/logs stream` to start live streaming"
         )
 
 
 async def _send_log_buffer(client, chat_id):
-    """Background task — buffer se logs Telegram pe bhejta hai"""
-    sent_count = 0
+    """Background task — naye logs Telegram pe bhejta hai"""
+    sent_count = len(telegram_log_handler._buffer)  # purane skip karo
+
     while telegram_log_handler._active:
-        await asyncio.sleep(10)  # har 10 seconds mein batch bhejo
-        if not telegram_log_handler._buffer:
+        await asyncio.sleep(8)
+
+        current_len = len(telegram_log_handler._buffer)
+        if current_len <= sent_count:
             continue
-        # Naye logs nikalo
-        new_logs = telegram_log_handler._buffer[sent_count:]
-        if not new_logs:
-            continue
-        sent_count = len(telegram_log_handler._buffer)
-        text = "\n".join(new_logs[-20:])
+
+        new_logs = telegram_log_handler._buffer[sent_count:current_len]
+        sent_count = current_len
+
+        text = "\n".join(new_logs)
         if len(text) > 3800:
             text = text[-3800:]
+
         try:
             await client.send_message(chat_id, f"📡 **Live Logs**\n\n`{text}`")
         except FloodWait as e:
             await asyncio.sleep(e.value)
         except:
             pass
-        # Buffer ko 200 lines tak rakho
-        if len(telegram_log_handler._buffer) > 200:
-            telegram_log_handler._buffer = telegram_log_handler._buffer[-200:]
-            sent_count = len(telegram_log_handler._buffer)
 
 
 # ================= MAIN RENAME =================
@@ -582,16 +575,6 @@ async def auto_rename_files(client, message: Message):
 
     season, episode = extract_season_episode(file_name)
     quality = extract_quality(file_name)
-
-    format_template = (
-        format_template.replace("{season}", season or "XX")
-        .replace("{episode}", episode or "XX")
-        .replace("{quality}", quality)
-    )
-
-    ext = os.path.splitext(file_name)[1]
-
-    safe_filename = re.sub(r"[^\w\-. \[\]@-]", "", f"{format_template}{ext}")
 
     os.makedirs("downloads", exist_ok=True)
 
@@ -640,7 +623,6 @@ async def auto_rename_files(client, message: Message):
             "-metadata", f"title={title}",
             "-metadata", f"author={author}",
             "-metadata", f"artist={artist}",
-            "-metadata", "encoder=SharkToonsIndia",
             "-y", meta_file,
         ]
 
