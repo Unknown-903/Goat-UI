@@ -513,6 +513,19 @@ async def run_compress(client, task):
         saved = orig_size - new_size
         saved_pct = round((saved / orig_size) * 100, 1) if orig_size else 0
 
+        # Agar compressed bada ho gaya toh original use karo
+        if new_size >= orig_size:
+            logger.warning(f"[{task_id}] Compressed ({new_size}) >= original ({orig_size}) — original use kar raha hoon")
+            os.remove(output)
+            # Original ko hi output maano
+            output = file_path
+            new_size = orig_size
+            saved = 0
+            saved_pct = 0
+            already_compressed_note = "\n⚠️ _File already compressed — original bheja gaya_"
+        else:
+            already_compressed_note = ""
+
         # ---------------- RENAME ----------------
         if msg.document and msg.document.file_name:
             name = msg.document.file_name
@@ -523,7 +536,7 @@ async def run_compress(client, task):
 
         name = os.path.splitext(name)[0] + ".mkv"
 
-        # ---------------- METADATA (fast remux — alag pass nahi) ----------------
+        # ---------------- METADATA ----------------
         title = await codeflixbots.get_title(user_id) or ""
         author = await codeflixbots.get_author(user_id) or ""
         artist = await codeflixbots.get_artist(user_id) or ""
@@ -543,8 +556,8 @@ async def run_compress(client, task):
         await progress_msg.edit("🏷️ Applying metadata...")
         meta_proc = await asyncio.create_subprocess_exec(
             *meta_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL
         )
         try:
             await asyncio.wait_for(meta_proc.wait(), timeout=120)
@@ -552,7 +565,8 @@ async def run_compress(client, task):
             meta_proc.kill()
 
         if os.path.exists(meta_file) and os.path.getsize(meta_file) > 0:
-            os.remove(output)
+            if output != file_path:  # original delete mat karo
+                os.remove(output)
             output_final = meta_file
         else:
             output_final = output
@@ -577,6 +591,7 @@ async def run_compress(client, task):
             f"✅ Saved: `{round(saved/1024/1024, 2)} MB ({saved_pct}%)`\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"📄 `{name}`"
+            f"{already_compressed_note}"
         )
 
         await progress_msg.edit("📤 Uploading...", reply_markup=cancel_btn)
